@@ -1,0 +1,166 @@
+#include<math.h>
+#include<LiquidCrystal.h>
+
+//LiquidCrystal lcd(5,4,3,2,1,0);
+
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2); //for printing speed
+
+const int analogInPin1 = A0;
+const int analogInPin2 = A5;      //for the two lasers
+const double dist = 44.45;        //Centimeters
+const int RED = 6;
+const int YELLOW = 7;
+const int GREEN = 8;
+const int BUZZER = 9; //denoting which digital pin is for what device
+const double THRESHOLD = 50.0;  //speed threshold = 50cm/s
+
+const int yellowdiff = 1500;  //time period for which yellow light stays on
+const int greenred = 5000;    //time period for which green/red light stays on
+
+int currentLight = YELLOW;
+int lastLight = RED;
+unsigned long lastSwitch = 0;   //time when the previous switch occured in lights
+int currentDelay = yellowdiff; //these initial values are chosen such that on turning on the arduino, the green led is turned on
+
+/*
+ * currentLight and lastLight both have to be stored because there are two possible outcomes from a yellow light.
+ * if it went from red to yellow, next light would be green. if green to yellow, next light red.
+ */
+
+int ldr1 = 1000, ldr2 = 1000; //analog values from LDRs. if laser is pointed at it gives 900+ reading constantly
+int nextPin = 0;  //if laser1 was interrupted first, laser2 is nextPin and vice versa. denotes which laser needs to be 
+                  //broken next for the speed to be calculated. ensures interrupting the same laser doesn't give reading
+int timerOn = 0;  //if timer is on, that means a break in nextPin will cause speed calculation
+double S = 0;     //speed
+unsigned long t1 = 0; //time of first break
+unsigned long t2 = 0; //time of final break
+unsigned long currTime = 0; //current time
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(9600);
+  
+  pinMode(RED, OUTPUT);
+  pinMode(YELLOW, OUTPUT);
+  pinMode(GREEN, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
+  
+  //UCSR0B = 0;
+  lcd.begin(16,2);
+  lcd.setCursor(2,0);
+  lcd.print("VeloGun"); //welcome message
+  //lcd.display();
+  delay(3000);
+  lcd.clear();
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  ldr1 = analogRead(analogInPin1);
+  ldr2 = analogRead(analogInPin2);  //read analog inputs
+  currTime = millis();  //get current time
+  if(ldr1 < 500 ) {           //if an LDR goes below 500, it's certain that the laser is not pointed at it, ie, a break has occured
+    if(timerOn&&nextPin==1) { //if the nextPin is this one, get speed, print speed, turn off timer.
+      t2 = currTime;
+      S = getSpeed();
+      printSpeed();
+      clearTimer();
+    }
+    else if(!timerOn) {       //if the timer is off, this is the first break
+      t1 = currTime;
+      timerOn = 1;
+      nextPin = 2;            //ldr2 has to be broken next to calculate speed
+    }
+    if(currentLight == RED) {     //somebody is running a red light. TO ARMS!!!!!!!
+      digitalWrite(BUZZER,HIGH);
+      delay(500);
+      digitalWrite(BUZZER, LOW);
+    }
+  }
+  if(ldr2 < 500) {        //EXACT same idea for LDR2, except there is no red light here
+    if(timerOn&&nextPin==2) {
+      t2 = currTime;
+      S = getSpeed();
+      printSpeed();
+      clearTimer();
+    }
+    else if(!timerOn) {
+      t1 = currTime;
+      timerOn = 1;
+      nextPin = 1;
+    }
+  }
+  if(timerOn&&(currTime-t1>5000)) { //if the timer has been On for more than 5 seconds. someone probably tripped one of the lasers and stopped midway (probably Noman)
+    clearTimer();
+    Serial.println("timer cleared");
+  }
+  traffic();                        //handle the traffic lights
+  delay(100);                       //na dile somossa aase :v
+}
+
+void clearTimer() {     //clear EVERYTHING
+  t1 = 0;
+  timerOn = 0;
+  nextPin = 0;
+}
+
+double getSpeed() {
+  //Serial.println(dist);
+  Serial.println(t1);
+  Serial.println(t2);
+  double speed = dist*1000/((double)(t2-t1));     //distance*1000 coz 1000ms == 1s
+  if(speed > THRESHOLD) {                         //someone's speeding. TO ARMS!!!!!!!
+    digitalWrite(BUZZER,HIGH);
+    delay(500);
+    digitalWrite(BUZZER, LOW);
+  }
+  return speed;
+}
+
+void printSpeed() {             //does what it says :v
+      Serial.print("speed = ");
+      lcd.clear();
+      Serial.println(S);
+      lcd.setCursor(0,0);
+      lcd.print(S);
+      lcd.print(" cm/s");
+      delay(500);               //na dile somossa kore :v
+      lcd.setCursor(0,1);
+      lcd.print("VeloGun Ready");
+}
+
+void traffic() {                              //baje manual coding, porle bujha uchit.
+  if(currTime - lastSwitch > currentDelay) {  //currentDelay is the delay of whichever light is on (yellowdiff/greenred)
+    if(currentLight == GREEN) {               //case: green to yellow
+      digitalWrite(GREEN, LOW);
+      digitalWrite(YELLOW, HIGH);
+      currentLight = YELLOW;
+      lastLight = GREEN;
+      currentDelay = yellowdiff;
+      lastSwitch = currTime;
+    }
+    else if(currentLight == RED) {            //case: red to yellow
+      digitalWrite(RED, LOW);
+      digitalWrite(YELLOW, HIGH);
+      currentLight = YELLOW;
+      lastLight = RED;
+      currentDelay = yellowdiff;
+      lastSwitch = currTime;
+    }
+    else if(lastLight == RED) {               //case: yellow from red to green
+      digitalWrite(YELLOW, LOW);
+      digitalWrite(GREEN, HIGH);
+      currentLight = GREEN;
+      lastLight = YELLOW;
+      currentDelay = greenred;
+      lastSwitch = currTime;
+    }
+    else if(lastLight == GREEN) {             //case: yellow from green to red
+      digitalWrite(YELLOW, LOW);
+      digitalWrite(RED, HIGH);
+      currentLight = RED;
+      lastLight = YELLOW;
+      currentDelay = greenred;
+      lastSwitch = currTime;
+    }
+  }
+}
